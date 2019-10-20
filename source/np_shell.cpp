@@ -9,14 +9,17 @@
 #include <vector>
 using namespace std;
 
+void execPipeCmd(vector<vector<char*>>*);
 void function_ls();
 void function_cat(vector<char*>*);
-void function_number(vector<char*>*);
+void function_executable(vector<char*>*);
 void printEnv(vector<char*>*,char**);
+void setEnv(vector<char*>*);
 void parseCmd(char*,vector<vector<char*>>*);
 
 void initialize(){
-    //unsetenv("PATH");
+    unsetenv("PATH");
+    setenv("PATH","bin:.",1);
 }
 
 int main(int argc,char* argv[],char* envp[]){
@@ -33,26 +36,88 @@ int main(int argc,char* argv[],char* envp[]){
 	parseCmd(cmd,&parsed_cmd);
 	if(parsed_cmd.size() == 0)    continue;
 
-        if(!strcmp(parsed_cmd[0][0],"exit")){
-            exitflag = true;
-        }
-	else if(!strcmp(parsed_cmd[0][0],"printenv")){
-	    printEnv(&parsed_cmd[0],envp);   
+	if(!strcmp(parsed_cmd[0][0],"exit"))
+	    exitflag = true;
+	else if(!strcmp(parsed_cmd[0][0],"printenv"))
+	    printEnv(&parsed_cmd[0],envp);
+	else if(!strcmp(parsed_cmd[0][0],"setenv"))
+	    setEnv(&parsed_cmd[0]);
+	else{
+	    execPipeCmd(&parsed_cmd);
 	}
-        else if(!strcmp(parsed_cmd[0][0],"ls")){
-            function_ls();
-        }
-        else if(!strcmp(parsed_cmd[0][0],"cat")){
-            function_cat(&parsed_cmd[0]);
-        }
-	else if(!strcmp(parsed_cmd[0][0],"number")){
-	    function_number(&parsed_cmd[0]);
-	}
-        else{
-            cerr << "Unknow command: [" << cmd << "]" << endl;
-        }
 	parsed_cmd.clear();
     }
+}
+
+void childHandler(){
+    int status;
+    while (waitpid(-1,&status,WNOHANG) > 0);
+}
+
+void execPipeCmd(vector<vector<char*>> *parsed_cmd){
+    int pipe_num = (*parsed_cmd).size(); 
+    int status;
+    int pipefd1[2];
+    if(pipe(pipefd1) < 0){
+	cerr << "Cannot pipe()" << endl;
+	exit(-1);
+    }
+
+    for(int i = 0;i < pipe_num;i++){
+    	int pipefd2[2];
+	if(pipe(pipefd2) < 0){
+	    cerr << "Cannot pipe()!" <<endl;
+	    exit(-1);
+	}
+
+	pid_t pid = fork();
+	if(pid == 0){
+	    close(pipefd1[1]);
+	    if(i > 0){
+	        dup2(pipefd1[0],STDIN_FILENO);
+	    }
+	    close(pipefd1[0]);	    
+
+	    close(pipefd2[0]);
+	    if(i < pipe_num-1){ //not last cmd
+	    	dup2(pipefd2[1],STDOUT_FILENO);
+	    }
+	    close(pipefd2[1]);
+
+	    int cmd_len = (*parsed_cmd)[i].size();
+	    if(cmd_len>2&&!strcmp((*parsed_cmd)[i][cmd_len-2],">")){
+	    	int fd = open((*parsed_cmd)[i][cmd_len-1],O_RDWR|O_CREAT|O_TRUNC,S_IWUSR|S_IRUSR);
+		dup2(fd,STDOUT_FILENO);	
+		close(fd);
+		(*parsed_cmd)[i].pop_back();
+		(*parsed_cmd)[i].pop_back();
+	    }
+	    (*parsed_cmd)[i].push_back(NULL);
+
+	    if(!strcmp((*parsed_cmd)[i][0],"ls")){
+	        function_ls();
+	    }
+	    else if(!strcmp((*parsed_cmd)[i][0],"cat")){
+	        function_cat(&((*parsed_cmd)[i]));
+	    }
+	    else{
+	    	function_executable(&((*parsed_cmd)[i]));
+	    }
+	}
+	else{
+	    close(pipefd1[0]);
+	    close(pipefd1[1]);
+	    if(i < pipe_num-1){
+	    	pipefd1[0] = pipefd2[0];
+		pipefd1[1] = pipefd2[1];
+	    }
+	    else{
+	        close(pipefd2[0]);
+		close(pipefd2[1]);
+	    }
+	    wait(NULL);
+	}
+    }    
 }
 
 void printEnv(vector<char*> *args,char **envp){
@@ -64,8 +129,12 @@ void printEnv(vector<char*> *args,char **envp){
     else{
     	for(char **ptr = envp;*ptr != 0; ptr++)
 	    cout << (*ptr) <<endl;
-    }
-    
+    }   
+}
+
+void setEnv(vector<char*> *args){
+    if((*args).size() < 3)    return;
+    setenv((*args)[1],(*args)[2],1);
 }
 
 void parseCmd(char *cmd,vector<vector<char*>> *parsedc){
@@ -92,44 +161,27 @@ void parseCmd(char *cmd,vector<vector<char*>> *parsedc){
 }
 
 void function_ls(){
-    pid_t pid = fork();
-    if(pid == 0){
-        execlp("ls","ls",NULL);
-        cout << flush;
-	exit(0);
-    }
-    else{
-        wait(NULL);
+    if(execlp("ls","ls",NULL)<0){
+    	cerr << "Error with ls!" << flush;
+    	exit(0);
     }
 }
 
 void function_cat(vector<char*> *args){    
-    pid_t pid = fork();
-    if(pid == 0){
-	if((*args).size() > 3&&!strcmp((*args)[2],">")){
- 	    int fd = open((*args)[3],O_RDWR|O_CREAT|O_TRUNC,S_IWUSR|S_IRUSR);
-	    close(1);
-	    dup(fd);
-	    close(fd);           
-	}
-	execlp("cat","cat",(*args)[1],NULL);
-	cout << endl;
-	exit(0);
-    }
-    else{
-	wait(NULL);
+    if(execvp("cat",(*args).data()) < 0){
+        cerr << "Error with cat!" <<endl;
+    	exit(-1);
     }
 }
 
-void function_number(vector<char*> *args){
-    pid_t pid = fork();
-    if(pid == 0){
-	execlp("./bin/number","number",(*args)[1],NULL);
-	cout <<endl;
-	exit(0);
+void function_executable(vector<char*> *args){    
+    cout << flush;
+    int result = execvp((*args)[0],(*args).data());
+    if(result == -1){
+	cerr << "Unknown command: [" << (*args)[0] << "]." << endl;
+    	exit(0);
     }
-    else{
-        wait(NULL);
+    else if(result < -1){
+    	cerr << "Error with executable!" <<endl;
     }
 }
-
