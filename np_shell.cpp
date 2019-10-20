@@ -49,33 +49,55 @@ int main(int argc,char* argv[],char* envp[]){
     }
 }
 
+void childHandler(){
+    int status;
+    while (waitpid(-1,&status,WNOHANG) > 0);
+}
+
 void execPipeCmd(vector<vector<char*>> *parsed_cmd){
-    int pipe_num = (*parsed_cmd).size();
-    int last_read; 
+    int pipe_num = (*parsed_cmd).size(); 
+    int status;
+    int pipefd1[2];
+    if(pipe(pipefd1) < 0){
+	cerr << "Cannot pipe()" << endl;
+	exit(-1);
+    }
+
     for(int i = 0;i < pipe_num;i++){
-    	int pipefd[2];
-	if(pipe(pipefd) < 0){
+    	int pipefd2[2];
+	if(pipe(pipefd2) < 0){
 	    cerr << "Cannot pipe()!" <<endl;
 	    exit(-1);
 	}
 
-	if(i == pipe_num-1){
-	    close(pipefd[0]);
-	    close(pipefd[1]);
-	}
-
 	pid_t pid = fork();
 	if(pid == 0){
+	/*
+	    cout << "pipe:" <<i<<endl;
+	    for(int j = 0;j < (*parsed_cmd)[i].size();j++)
+		cout << (*parsed_cmd)[i][j] <<" ";
+	*/
+	    close(pipefd1[1]);
 	    if(i > 0){
-	        dup2(last_read,STDIN_FILENO);
-	    	close(last_read);
-	    }	    
-
-	    if(i < pipe_num-1){ //not last cmd
-	 	close(pipefd[0]);
-	    	dup2(pipefd[1],STDOUT_FILENO);
-		close(pipefd[1]);
+	        dup2(pipefd1[0],STDIN_FILENO);
 	    }
+	    close(pipefd1[0]);	    
+
+	    close(pipefd2[0]);
+	    if(i < pipe_num-1){ //not last cmd
+	    	dup2(pipefd2[1],STDOUT_FILENO);
+	    }
+	    close(pipefd2[1]);
+
+	    int cmd_len = (*parsed_cmd)[i].size();
+	    if(cmd_len>2&&!strcmp((*parsed_cmd)[i][cmd_len-2],">")){
+	    	int fd = open((*parsed_cmd)[i][cmd_len-1],O_RDWR|O_CREAT|O_TRUNC,S_IWUSR|S_IRUSR);
+		dup2(fd,STDOUT_FILENO);	
+		close(fd);
+		(*parsed_cmd)[i].pop_back();
+		(*parsed_cmd)[i].pop_back();
+	    }
+	    (*parsed_cmd)[i].push_back(NULL);
 
 	    if(!strcmp((*parsed_cmd)[i][0],"ls")){
 	        function_ls();
@@ -88,14 +110,19 @@ void execPipeCmd(vector<vector<char*>> *parsed_cmd){
 	    }
 	}
 	else{
-	    if(i > 0)    close(last_read);
+	    close(pipefd1[0]);
+	    close(pipefd1[1]);
 	    if(i < pipe_num-1){
-	    	close(pipefd[1]);
-		last_read = pipefd[0];
+	    	pipefd1[0] = pipefd2[0];
+		pipefd1[1] = pipefd2[1];
+	    }
+	    else{
+	        close(pipefd2[0]);
+		close(pipefd2[1]);
 	    }
 	    wait(NULL);
 	}
-    }
+    }    
 }
 
 void printEnv(vector<char*> *args,char **envp){
@@ -107,8 +134,7 @@ void printEnv(vector<char*> *args,char **envp){
     else{
     	for(char **ptr = envp;*ptr != 0; ptr++)
 	    cout << (*ptr) <<endl;
-    }
-    
+    }   
 }
 
 void setEnv(vector<char*> *args){
@@ -140,28 +166,27 @@ void parseCmd(char *cmd,vector<vector<char*>> *parsedc){
 }
 
 void function_ls(){
-    execlp("ls","ls",NULL);
-    cout << flush;
-    exit(0);
+    if(execlp("ls","ls",NULL)<0){
+    	cerr << "Error with ls!" << flush;
+    	exit(0);
+    }
 }
 
 void function_cat(vector<char*> *args){    
-    if((*args).size() > 3&&!strcmp((*args)[2],">")){
-        int fd = open((*args)[3],O_RDWR|O_CREAT|O_TRUNC,S_IWUSR|S_IRUSR);
-        close(1);
-        dup(fd);
-        close(fd);           
+    if(execvp("cat",(*args).data()) < 0){
+        cerr << "Error with cat!" <<endl;
+    	exit(-1);
     }
-    execvp("cat",(*args).data());
-    cout << flush;
-    exit(0);
 }
 
 void function_executable(vector<char*> *args){    
     cout << flush;
     int result = execvp((*args)[0],(*args).data());
-    if(result == -1)
-	cerr << "Unknown command: [" << (*args)[0] << "].";
-    cout << endl;
-    exit(0);
+    if(result == -1){
+	cerr << "Unknown command: [" << (*args)[0] << "]." << endl;
+    	exit(0);
+    }
+    else if(result < -1){
+    	cerr << "Error with executable!" <<endl;
+    }
 }
