@@ -26,6 +26,8 @@ struct delayPipe{
     int delay_count;
 };
 vector<delayPipe> pipes;
+const char *normalDelim = "|";
+const char *plusErrDelim = "!";
 
 void initialize(){
     unsetenv("PATH");
@@ -45,6 +47,12 @@ int main(int argc,char* argv[],char* envp[]){
         cin.getline(cmd,100);
 	parseCmd(cmd,&parsed_cmd);
 	if(parsed_cmd.size() == 0)    continue;
+/*	
+	for(int i = 0;i < parsed_cmd.size();i++){
+	    for(int j = 0;j <parsed_cmd[i].size();j++)
+		cout << parsed_cmd[i][j] <<" ";
+	    cout << endl;
+	}*/
 
 	if(!strcmp(parsed_cmd[0][0],"exit"))
 	    exitflag = true;
@@ -112,6 +120,9 @@ void execPipeCmd(vector<vector<char*>> *parsed_cmd){
 	    }			
 	}
 
+	char *pipeType = (*parsed_cmd)[i].back();
+	(*parsed_cmd)[i].pop_back();
+
 	int in_pipe = checkPipe(); //check if this command is piped. return pipe index, or -1(no pipe)
 	pid_t pid = fork();
 	if(pid == 0){
@@ -124,6 +135,8 @@ void execPipeCmd(vector<vector<char*>> *parsed_cmd){
             if(out_pipe > -1){
 		close(pipes[out_pipe].fd[0]);
 		dup2(pipes[out_pipe].fd[1],STDOUT_FILENO);
+		if(pipeType == plusErrDelim)
+		    dup2(pipes[out_pipe].fd[1],STDERR_FILENO);
 		close(pipes[out_pipe].fd[1]);
 	    }
 			
@@ -181,23 +194,30 @@ void setEnv(vector<char*> *args){
 
 void parseCmd(char *cmd,vector<vector<char*>> *parsedc){
     char* sub_cmd;
-    const char* delim="|";
-    const char* delim1="!";
     char* saveptr;
     vector<char*> pipe_cmds;
 
-    sub_cmd = strtok_r(cmd,delim,&saveptr);
+    sub_cmd = strtok_r(cmd,normalDelim,&saveptr);
     while(sub_cmd){
-	char* sub_sub_cmd = strtok(sub_cmd,delim1);
+	char* sub_sub_cmd = strtok(sub_cmd,plusErrDelim);
 	while(sub_sub_cmd){
 	    pipe_cmds.push_back(sub_sub_cmd);
-	    sub_sub_cmd = strtok(NULL,delim1);
+	    pipe_cmds.push_back((char*)plusErrDelim);  //push '!'
+	    sub_sub_cmd = strtok(NULL,plusErrDelim);
 	}
-        sub_cmd = strtok_r(NULL,delim,&saveptr);
+	pipe_cmds.pop_back();
+	pipe_cmds.push_back((char*)normalDelim); //push "|"
+        sub_cmd = strtok_r(NULL,normalDelim,&saveptr);
     }
+    pipe_cmds.pop_back();
 
     const char* delim2 = " ";
     for(int i = 0;i < pipe_cmds.size();i++){
+	if(!strcmp(pipe_cmds[i],"|")||!strcmp(pipe_cmds[i],"!")){
+	    *((*parsedc).back().end()-2) = pipe_cmds[i];
+	    continue;
+	}
+
 	if(i>0&&pipe_cmds[i][0] != ' '){
 	    char *pipe_delay = strtok(pipe_cmds[i],delim2);
 	    (*parsedc).back().back() = pipe_delay;
@@ -214,8 +234,10 @@ void parseCmd(char *cmd,vector<vector<char*>> *parsedc){
 	
 	if((*parsedc).back().size()==0) //empty(invalid) command
             (*parsedc).pop_back();
-	else //valid command
-	    (*parsedc).back().push_back(NULL); //indicate the pipeDelay num is 0 or unknown
+	else{ //valid command
+	    (*parsedc).back().push_back(NULL); //indicate the following pipe symbol, NULL means no pipe
+    	    (*parsedc).back().push_back(NULL); //indicate the pipeDelay num is 0 or unknown
+	}
     }
     vector<char*>().swap(pipe_cmds); //release pipe_cmds
 }
