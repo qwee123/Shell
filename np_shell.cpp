@@ -10,10 +10,15 @@
 #include <signal.h>
 using namespace std;
 
+pid_t getFork();
+int findOutpipe(int);
 int checkPipe();
 void pipeCountDown();
 int mergePipeDelay(int);
 void removePipe(int);
+void pipeRedirection(int,int,char*,vector<char*>*);
+void redirectInpipe(int);
+void redirectOutpipe(int,char *);
 void execPipeCmd(vector<vector<char*>>*);
 void function_ls(vector<char*>*);
 void function_cat(vector<char*>*);
@@ -92,6 +97,66 @@ void removePipe(int index){
     pipes.erase(itr,itr+1);
 }
 
+int findOutpipe(int delay_int){
+    int out_pipe = mergePipeDelay(delay_int); //-1 means need to push new delayPipe, other return values mean there is already one in vector.
+    if(out_pipe == -1){ //out_pipe should >= -1 in normal
+    	int pipefd[2];
+	if(pipe(pipefd) < 0){
+            cerr << "Cannot pipe()!" <<endl;
+	    exit(-1);
+	}
+	struct delayPipe p = {.fd = {pipefd[0],pipefd[1]}, .delay_count = delay_int};
+	out_pipe = pipes.size();
+	pipes.push_back(p);
+    }
+    return out_pipe;	
+}
+
+void redirectInpipe(int in_pipe){
+    close(pipes[in_pipe].fd[1]);
+    dup2(pipes[in_pipe].fd[0],STDIN_FILENO);
+    close(pipes[in_pipe].fd[0]);
+}
+
+void redirectOutpipe(int out_pipe,char *pipeType){
+    close(pipes[out_pipe].fd[0]);
+    dup2(pipes[out_pipe].fd[1],STDOUT_FILENO);
+   if(pipeType == plusErrDelim)
+        dup2(pipes[out_pipe].fd[1],STDERR_FILENO);
+    close(pipes[out_pipe].fd[1]);
+}
+
+pid_t getFork(){
+    pid_t pid = fork();
+    int retry = 0;
+    while(pid < 0){
+        if((++retry) > 20){
+	    cerr << "Cannot fork!!" << endl;
+	    exit(-1);
+	}
+	sleep(1);
+	pid = fork();
+    }
+    return pid;
+}
+
+void pipeRedirection(int in_pipe, int out_pipe, char *pipeType,vector<char*> *cmd){
+    if(in_pipe > -1)
+	redirectInpipe(in_pipe);
+    if(out_pipe > -1)
+	redirectOutpipe(out_pipe,pipeType);
+
+    int cmd_len = (*cmd).size();
+    if(cmd_len>2 && !strcmp((*cmd)[cmd_len-2],">")){
+    	int fd = open((*cmd).back(),O_RDWR|O_CREAT|O_TRUNC,S_IWUSR|S_IRUSR);
+	dup2(fd,STDOUT_FILENO);
+	close(fd);
+	(*cmd).pop_back();
+	(*cmd).pop_back();
+    }
+    (*cmd).push_back(NULL);//exec() based function need a NULL at the end of argv
+}
+
 void execPipeCmd(vector<vector<char*>> *parsed_cmd){
     int pipe_num = (*parsed_cmd).size(); 
     int status;
@@ -99,59 +164,25 @@ void execPipeCmd(vector<vector<char*>> *parsed_cmd){
     for(int i = 0;i < pipe_num;i++){
 	pipeCountDown();
 
-    	int out_pipe = -1;
+    	int out_pipe;
 	char *delay = (*parsed_cmd)[i].back();
 	(*parsed_cmd)[i].pop_back();
 	if(!(i == pipe_num-1&&delay == NULL)){
             int delay_int = delay == NULL?1:atoi(delay);
-	    out_pipe = mergePipeDelay(delay_int); //-1 means need to push new delayPipe, other return values mean there is already one in vector.
-	    if(out_pipe == -1){ //out_pipe should >= -1 in normal
-		int pipefd[2];
-		if(pipe(pipefd) < 0){
-	            cerr << "Cannot pipe()!" <<endl;
-		    exit(-1);
-		}
-		struct delayPipe p = {.fd = {pipefd[0],pipefd[1]}, .delay_count = delay_int};
-		out_pipe = pipes.size();
-		pipes.push_back(p);
-	    }			
+            out_pipe = findOutpipe(delay_int);
 	}
-
+        else  //output directly
+            out_pipe = -1;
+    
+        // find if the pipe is '|','!' or NULL
 	char *pipeType = (*parsed_cmd)[i].back();
 	(*parsed_cmd)[i].pop_back();
 
 	int in_pipe = checkPipe(); //check if this command is piped. return pipe index, or -1(no pipe)
-	pid_t pid = fork();
-	while(pid == -1){
-	    sleep(1);
-	    pid = fork();
-	}
-
+	pid_t pid = getFork(); // fork until success,or exit if cannot fork after 20 retries.
+        
 	if(pid == 0){
-	    if(in_pipe > -1){
-		close(pipes[in_pipe].fd[1]);
-		dup2(pipes[in_pipe].fd[0],STDIN_FILENO);
-		close(pipes[in_pipe].fd[0]);
-	    }
-
-            if(out_pipe > -1){
-		//cout << i << "pipe to : " << pipes[out_pipe].fd[1] << endl;
-		close(pipes[out_pipe].fd[0]);
-		dup2(pipes[out_pipe].fd[1],STDOUT_FILENO);
-		if(pipeType == plusErrDelim)
-		    dup2(pipes[out_pipe].fd[1],STDERR_FILENO);
-		close(pipes[out_pipe].fd[1]);
-	    }
-			
-	    int cmd_len = (*parsed_cmd)[i].size();
-	    if(cmd_len>2&&!strcmp((*parsed_cmd)[i][cmd_len-2],">")){
-		int fd = open((*parsed_cmd)[i][cmd_len-1],O_RDWR|O_CREAT|O_TRUNC,S_IWUSR|S_IRUSR);
-		dup2(fd,STDOUT_FILENO);	
-		close(fd);
-		(*parsed_cmd)[i].pop_back();
-		(*parsed_cmd)[i].pop_back();
-	    }
-	    (*parsed_cmd)[i].push_back(NULL);
+            pipeRedirection(in_pipe,out_pipe,pipeType,&(*parsed_cmd)[i]);
 
 	    if(!strcmp((*parsed_cmd)[i][0],"ls")){
 		function_ls(&((*parsed_cmd)[i]));
