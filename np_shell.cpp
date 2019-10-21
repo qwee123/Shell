@@ -46,13 +46,13 @@ int main(int argc,char* argv[],char* envp[]){
     initialize();    
     signal(SIGCHLD,childHandler);
     bool exitflag = false;   
-    char *cmd = new char[100];
+    char *cmd = new char[15000];
     vector<vector<char*>> parsed_cmd;
     //cout << &parsed_cmd <<endl;
     //cout << &cmd <<endl;
     while(!exitflag){
         cout << "% "<< flush;
-        cin.getline(cmd,100);
+        cin.getline(cmd,15000);
 	parseCmd(cmd,&parsed_cmd);
 	if(parsed_cmd.size() == 0)    continue;
 
@@ -122,6 +122,11 @@ void execPipeCmd(vector<vector<char*>> *parsed_cmd){
 
 	int in_pipe = checkPipe(); //check if this command is piped. return pipe index, or -1(no pipe)
 	pid_t pid = fork();
+	while(pid == -1){
+	    sleep(1);
+	    pid = fork();
+	}
+
 	if(pid == 0){
 	    if(in_pipe > -1){
 		close(pipes[in_pipe].fd[1]);
@@ -130,6 +135,7 @@ void execPipeCmd(vector<vector<char*>> *parsed_cmd){
 	    }
 
             if(out_pipe > -1){
+		//cout << i << "pipe to : " << pipes[out_pipe].fd[1] << endl;
 		close(pipes[out_pipe].fd[0]);
 		dup2(pipes[out_pipe].fd[1],STDOUT_FILENO);
 		if(pipeType == plusErrDelim)
@@ -243,14 +249,14 @@ void parseCmd(char *cmd,vector<vector<char*>> *parsedc){
 
 void function_ls(vector<char*> *args){
     if(execvp("ls",(*args).data())<0){
-    	cerr << "Error with ls!" << flush;
+    	cerr << "Unknown command: [" <<(*args)[0] << "]." << endl;
     	exit(-1);
     }
 }
 
 void function_cat(vector<char*> *args){    
     if(execvp("cat",(*args).data()) < 0){
-        cerr << "Error with cat!" <<endl;
+        cerr << "Unknown command: [" <<(*args)[0] << "]." << endl;
     	exit(-1);
     }
 }
