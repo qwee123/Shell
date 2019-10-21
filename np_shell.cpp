@@ -7,6 +7,7 @@
 #include <unistd.h>
 #include <wait.h>
 #include <vector>
+#include <signal.h>
 using namespace std;
 
 int checkPipe();
@@ -29,6 +30,13 @@ vector<delayPipe> pipes;
 const char *normalDelim = "|";
 const char *plusErrDelim = "!";
 
+void childHandler(int signo){
+    int status;
+    int pid;
+    while((pid = waitpid(-1,&status,WNOHANG)) > 0) ; 
+	//cerr << pid << " exits!(with signal)" << endl;
+}
+
 void initialize(){
     unsetenv("PATH");
     setenv("PATH","bin:.",1);
@@ -36,7 +44,7 @@ void initialize(){
 
 int main(int argc,char* argv[],char* envp[]){
     initialize();    
-
+    signal(SIGCHLD,childHandler);
     bool exitflag = false;   
     char *cmd = new char[100];
     vector<vector<char*>> parsed_cmd;
@@ -47,12 +55,6 @@ int main(int argc,char* argv[],char* envp[]){
         cin.getline(cmd,100);
 	parseCmd(cmd,&parsed_cmd);
 	if(parsed_cmd.size() == 0)    continue;
-/*	
-	for(int i = 0;i < parsed_cmd.size();i++){
-	    for(int j = 0;j <parsed_cmd[i].size();j++)
-		cout << parsed_cmd[i][j] <<" ";
-	    cout << endl;
-	}*/
 
 	if(!strcmp(parsed_cmd[0][0],"exit"))
 	    exitflag = true;
@@ -65,11 +67,6 @@ int main(int argc,char* argv[],char* envp[]){
 	}
 	parsed_cmd.clear();
     }
-}
-
-void childHandler(){
-    int status;
-    while (waitpid(-1,&status,WNOHANG) > 0);
 }
 
 int checkPipe(){
@@ -168,7 +165,9 @@ void execPipeCmd(vector<vector<char*>> *parsed_cmd){
 		close(pipes[in_pipe].fd[1]);
 		removePipe(in_pipe);
 	    }
-	    wait(NULL);
+	    //wait(NULL);
+	    if(i == pipe_num-1&&delay == NULL)
+	        waitpid(pid,&status,0);
 	}
     }    
 }
