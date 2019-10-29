@@ -59,7 +59,7 @@ int main(int argc,char* argv[],char* envp[]){
         cout << "% "<< flush;
         cin.getline(cmd,15000);
 	parseCmd(cmd,&parsed_cmd);
-	if(parsed_cmd.size() == 0)    continue;
+	if((int)parsed_cmd.size() < 1)	continue;
 
 	if(!strcmp(parsed_cmd[0][0],"exit"))
 	    exitflag = true;
@@ -232,7 +232,6 @@ void parseCmd(char *cmd,vector<vector<char*>> *parsedc){
     char* sub_cmd;
     char* saveptr;
     vector<char*> pipe_cmds;
-
     sub_cmd = strtok_r(cmd,normalDelim,&saveptr);
     while(sub_cmd){
 	char* sub_sub_cmd = strtok(sub_cmd,plusErrDelim);
@@ -246,9 +245,9 @@ void parseCmd(char *cmd,vector<vector<char*>> *parsedc){
         sub_cmd = strtok_r(NULL,normalDelim,&saveptr);
     }
     pipe_cmds.pop_back();
-
+    
     const char* delim2 = " ";
-    for(int i = 0;i < pipe_cmds.size();i++){
+    for(int i = 0;i < (int)pipe_cmds.size();i++){
 	if(!strcmp(pipe_cmds[i],"|")||!strcmp(pipe_cmds[i],"!")){
 	    *((*parsedc).back().end()-2) = pipe_cmds[i];
 	    continue;
